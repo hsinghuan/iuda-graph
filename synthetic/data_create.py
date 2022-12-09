@@ -54,6 +54,6 @@ def make_sbmf(feature_change_data_dir:str):
 if __name__ == "__main__":
     set_model_seed(42)
     block_change_data_dir = "/home/hhchung/data/pyg-data/sbmb_hard"
-    # feature_change_data_dir = "/home/hhchung/data/pyg-data/sbmf"
+    feature_change_data_dir = "/home/hhchung/data/pyg-data/sbmf"
     sbmb_data_list = make_sbmb(block_change_data_dir)
-    # sbmf_data_list = make_sbmf(feature_change_data_dir)
+    sbmf_data_list = make_sbmf(feature_change_data_dir)
