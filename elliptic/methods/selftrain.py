@@ -10,21 +10,72 @@ from torch_geometric.loader import DataLoader
 from .utils import negative_entropy_from_logits
 
 
-class DIRTTAdapter(): # don't use source
-    def __init__(self, model, teacher, device, vat=False):
+class SelfTrainAdapter():
+    def __init__(self, encoder, classifier, src_train_loader, src_val_loader, device):
         self.device = device
-        self.set_model_teacher(encoder, classifier)
+        self.set_encoder_classifier(encoder, classifier)
+        self.src_train_loader = src_train_loader
+        self.src_val_loader = src_val_loader
         self.num_class = 3
-        self.vat = vat
 
     def _adapt_train_epoch(self, encoder, classifier, tgt_train_loader, optimizer, reg_weight=None):
         encoder.train()
         classifier.train()
 
+        len_dataloader = min(len(self.src_train_loader), len(tgt_train_loader))
+        src_iter = iter(self.src_train_loader)
+        tgt_iter = iter(tgt_train_loader)
 
 
+        total_src_loss = 0
+        total_tgt_loss = 0
+        total_src_node = 0
+        total_tgt_node = 0
+        total_src_logits = []
+        total_tgt_logits = []
+        for _ in range(len_dataloader):
+            src_data = src_iter.next().to(self.device)
+            src_y, _ = classifier(encoder(src_data.x, src_data.edge_index))
+            src_loss = F.nll_loss(F.log_softmax(src_y[src_data.mask], dim=1), src_data.y[src_data.mask], reduction='sum')
+            src_node_num = src_data.mask.sum().item()
+            total_src_logits.append(src_y)
 
 
+            tgt_data, pseudo_tgt_label, pseudo_tgt_mask = tgt_iter.next()
+            pseudo_tgt_label = torch.squeeze(pseudo_tgt_label, dim=0).to(self.device)
+            pseudo_tgt_mask = torch.squeeze(pseudo_tgt_mask, dim=0).to(self.device)
+            tgt_data = tgt_data.to(self.device)
+            tgt_y, _ = classifier(encoder(tgt_data.x, tgt_data.edge_index))
+            tgt_loss = F.nll_loss(F.log_softmax(tgt_y, dim=1)[pseudo_tgt_mask],
+                                         pseudo_tgt_label[pseudo_tgt_mask], reduction='sum')
+
+            if reg_weight:
+                mrkld = torch.sum(- F.log_softmax(tgt_y, dim=1)[pseudo_tgt_mask] / self.num_class)
+                tgt_loss += mrkld * reg_weight
+
+
+            tgt_node_num = tgt_data.x[pseudo_tgt_mask].shape[0]
+            total_tgt_logits.append(tgt_y[pseudo_tgt_mask])
+
+            loss = src_loss + tgt_loss
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_src_loss += src_loss.item()
+            total_tgt_loss += tgt_loss.item()
+            total_src_node += src_node_num
+            total_tgt_node += tgt_node_num
+
+        total_loss = (total_src_loss + total_tgt_loss) / (total_src_node + total_tgt_node)
+        total_src_loss /= total_src_node
+        total_tgt_loss /= total_tgt_node
+        total_src_logits = torch.cat(total_src_logits)
+        total_tgt_logits = torch.cat(total_tgt_logits)
+        return total_loss, total_src_loss, total_tgt_loss, total_src_logits, total_tgt_logits, total_tgt_node
+
+    @torch.no_grad()
     def _adapt_test_epoch(self, encoder, classifier, tgt_val_loader, reg_weight=None):
         encoder.eval()
         classifier.eval()
@@ -42,7 +93,7 @@ class DIRTTAdapter(): # don't use source
         for _ in range(len_dataloader):
             src_data = src_iter.next().to(self.device)
             src_y, _ = classifier(encoder(src_data.x, src_data.edge_index))
-            src_loss = F.nll_loss(F.log_softmax(src_y, dim=1), src_data.y, reduction='sum')
+            src_loss = F.nll_loss(F.log_softmax(src_y[src_data.mask], dim=1), src_data.y[src_data.mask], reduction='sum')
             src_node_num = src_data.x.shape[0]
             total_src_logits.append(src_y)
 
@@ -79,7 +130,7 @@ class DIRTTAdapter(): # don't use source
 
         p_list = [p_min + i * p_inc for i in range(int((p_max - p_min)//p_inc) + 1)]
         total_e = 0
-        print("reg weight", reg_weight)
+        # print("reg weight", reg_weight)
 
         for p in p_list:
             # pseudo label
@@ -160,7 +211,7 @@ class DIRTTAdapter(): # don't use source
         performance_dict = dict()
         for reg_weight in reg_weight_list:
             run_name = f'{args.method}_{str(args.p_min).replace(".","")}_{str(args.p_max).replace(".","")}_{str(args.p_inc).replace(".","")}_{str(reg_weight).replace(".", "")}_{str(args.model_seed)}'
-            self.writer = SummaryWriter(os.path.join(args.log_dir, args.shift, str(stage[0]) + "_" + str(stage[1]) + "_" + str(stage[2]), run_name))
+            self.writer = SummaryWriter(os.path.join(args.log_dir, str(stage[0]) + "_" + str(stage[1]) + "_" + str(stage[2]), run_name))
             encoder, classifier, val_score = self._adapt_train_test(tgt_train_loader, tgt_val_loader, args, p_min=args.p_min, p_max=args.p_max, p_inc=args.p_inc, reg_weight=reg_weight)
             performance_dict[reg_weight] = {'tgt_encoder': encoder, 'tgt_classifier': classifier, 'tgt_val_score': val_score}
 
@@ -175,7 +226,22 @@ class DIRTTAdapter(): # don't use source
         self.set_encoder_classifier(best_encoder, best_classifier)
 
     def pseudo_label(self, encoder, classifier, data, p):
-        pass
+        encoder.eval()
+        classifier.eval()
+        pseudo_y, _ = classifier(encoder(data.x, data.edge_index))
+        pseudo_y = F.softmax(pseudo_y, dim=1)
+        pseudo_y_confidence, pseudo_y_hard_label = torch.max(pseudo_y, dim=1)
+        pseudo_mask = torch.zeros_like(pseudo_y_hard_label, dtype=torch.bool)
+        # for each class, sort the confidence from high to low, and mark the top p portion as True in the pseudo mask
+        for cls in range(torch.max(pseudo_y_hard_label) + 1):
+            cls_num = (pseudo_y_hard_label==cls).sum().item()
+            cls_confidence = pseudo_y_confidence[pseudo_y_hard_label==cls] # the confidence of those predicted as cls
+            cls_idx = torch.arange(len(pseudo_y_hard_label))[pseudo_y_hard_label==cls] # the true indices of those predicted as cls
+            sorted_confidence_idx = torch.argsort(cls_confidence, descending=True)
+            top_p_confident_cls_idx = cls_idx[sorted_confidence_idx][:int(cls_num * p) + 1]
+            # print(pseudo_y_confidence[top_p_confident_cls_idx])
+            pseudo_mask[top_p_confident_cls_idx] = True
+        return pseudo_y_hard_label, pseudo_mask
 
     def set_encoder_classifier(self, encoder, classifier):
         self.encoder = deepcopy(encoder).to(self.device)
