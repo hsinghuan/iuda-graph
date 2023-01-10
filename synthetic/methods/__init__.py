@@ -5,4 +5,6 @@ from .vat import VirtualAdversarialTrainer
 from .selftrain_vat import VirtualAdversarialSelfTrainer
 from .selftrain_obvat import OBVATSelfTrainer
 from .mean_teacher import MeanTeacherAdapter
+from .fixmatch import FixMatchAdapter
+from .adamatch import AdaMatchAdapter
 from .dirtt import  DIRTTAdapter

@@ -5,18 +5,23 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.loader import DataLoader
-# from torch_sparse import SparseTensor
+from torch_sparse import SparseTensor
+from torch_geometric.nn.models import LabelPropagation
 from pytorch_adapt.validators import BNMValidator, IMValidator
 from .vat import VATLoss
 
 class VirtualAdversarialSelfTrainer():
-    def __init__(self, model, src_train_loader=None, src_val_loader=None, device="cpu"):
+    def __init__(self, model, src_train_loader=None, src_val_loader=None, device="cpu", propagate=False):
         self.device = device
         self.set_model(model)
         self.src_train_loader = src_train_loader
         self.src_val_loader = src_val_loader
         # self.validator = BNMValidator()
         self.validator = IMValidator()
+        self.propagate = propagate
+        if self.propagate:
+            print("Use Label Propagation As Consistency Regularization")
+            self.prop = LabelPropagation(50, 0.6)
 
     def _adapt_train_epoch(self, model, tgt_train_loader, optimizer, xi=1e-6, eps=1.0, ip=1):
         model.train()
@@ -220,15 +225,15 @@ class VirtualAdversarialSelfTrainer():
         pseudo_y, _ = model(data.x, data.edge_index)
         pseudo_y = F.softmax(pseudo_y, dim=1)
 
-        # if self.propagate:
-        #     adj = SparseTensor(row=data.edge_index[0], col=data.edge_index[1],
-        #                        sparse_sizes=(data.x.shape[0], data.x.shape[0]))
-        #     adj_t = adj.t()
-        #     deg = adj_t.sum(dim=1).to(torch.float)
-        #     deg_inv_sqrt = deg.pow_(-0.5)
-        #     deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-        #     DAD = deg_inv_sqrt.view(-1, 1) * adj_t * deg_inv_sqrt.view(1, -1)
-        #     pseudo_y = self.prop(pseudo_y, DAD)
+        if self.propagate:
+            adj = SparseTensor(row=data.edge_index[0], col=data.edge_index[1],
+                               sparse_sizes=(data.x.shape[0], data.x.shape[0]))
+            adj_t = adj.t()
+            deg = adj_t.sum(dim=1).to(torch.float)
+            deg_inv_sqrt = deg.pow_(-0.5)
+            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+            DAD = deg_inv_sqrt.view(-1, 1) * adj_t * deg_inv_sqrt.view(1, -1)
+            pseudo_y = self.prop(pseudo_y, DAD)
 
         pseudo_y_confidence, pseudo_y_hard_label = torch.max(pseudo_y, dim=1)
         pseudo_mask = pseudo_y_confidence > thres

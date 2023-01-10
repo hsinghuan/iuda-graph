@@ -111,7 +111,7 @@ def main(args):
         adapter = methods.VirtualAdversarialTrainer(model, device=device)
     elif args.method == "selftrain-vat":
         model = Model(encoder, mlp)
-        adapter = methods.VirtualAdversarialSelfTrainer(model, src_train_loader, src_val_loader, device)
+        adapter = methods.VirtualAdversarialSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
     elif args.method == "selftrain-vat-tgt":
         model = Model(encoder, mlp)
         adapter = methods.VirtualAdversarialSelfTrainer(model, device=device)
@@ -127,6 +127,12 @@ def main(args):
     elif args.method == "mean-teacher-tgt":
         model = Model(encoder, mlp)
         adapter = methods.MeanTeacherAdapter(model, device=device)
+    elif args.method == "fixmatch":
+        model = Model(encoder, mlp)
+        adapter = methods.FixMatchAdapter(model, src_train_loader, src_val_loader, device=device)
+    elif args.method == "adamatch":
+        model = Model(encoder, mlp)
+        adapter = methods.AdaMatchAdapter(model, src_train_loader, src_val_loader, device=device)
     elif args.method == "dirt-t":
         model = Model(encoder, mlp)
         teacher = Model(encoder, mlp)
@@ -198,6 +204,18 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, train_stage_list[j + 1], args)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "fixmatch":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            con_tradeoff_list = [0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, train_stage_list[j + 1], args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "adamatch":
+            tau_list = [0.7, 0.8, 0.9]
+            mu_list = [0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, train_stage_list[j + 1], args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
         elif args.method == "dirt-t":
             pass
         elif args.method == "fixed":
@@ -219,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--result_dir", type=str, help="path to performance results directory", default="results")
     parser.add_argument("--method", type=str, help="adaptation method")
     parser.add_argument("--train_epochs", type=int, help="number of training epochs", default=500)
-    parser.add_argument("--adapt_epochs", type=int, help="number of adaptation epochs", default=500)
+    parser.add_argument("--adapt_epochs", type=int, help="number of adaptation epochs", default=50)
     parser.add_argument("--adapt_lr", type=float, help="learning rate for adaptation optimizer", default=1e-3)
     parser.add_argument("--p_min", type=float, help="initial ratio of unlabeled data being pseudo-labeled", default=0.2)
     parser.add_argument("--p_max", type=float, help="final ratio of unlabeled data being pseudo-labeled", default=0.5)
