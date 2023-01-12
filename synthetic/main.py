@@ -5,12 +5,15 @@ from copy import deepcopy
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-
 from utils import set_model_seed, get_device
-from model import TwoLayerGraphSAGE, MLPHead, Model
 from dataset import load_sbm_dataset
 from shared import train_stage_list, test_stage_list
 import methods
+
+import sys
+sys.path.append("..")
+from adapter import MultigraphSelfTrainer, MultigraphVirtualAdversarialSelfTrainer, MultigraphClassBalancedSelfTrainer, MultigraphMeanTeacherAdapter, MultigraphFixMatchAdapter, MultigraphAdaMatchAdapter
+from model import TwoLayerGraphSAGE, MLPHead, Model
 
 def train(encoder, mlp, optimizer, loader, device="cpu"):
     encoder.train()
@@ -95,14 +98,19 @@ def main(args):
     encoder, mlp, src_train_loader, src_val_loader = train_source(train_stage_list[0], device, args)
     class_num = 3 if args.shift == "sbmb" else 2
 
-    if args.method == "cbst":
-        adapter = methods.ClassBalancedSelfTrainer(encoder, mlp, src_train_loader, src_val_loader, class_num, device, args.label_prop)
-    elif args.method == "cbst-tgt":
-        adapter = methods.ClassBalancedTargetSelfTrainer(encoder, mlp, class_num, device, args.label_prop)
-    elif args.method == "selftrain":
-        adapter = methods.SelfTrainer(encoder, mlp, src_train_loader, src_val_loader, device, propagate=args.label_prop)
+    if args.method == "selftrain":
+        # adapter = methods.SelfTrainer(encoder, mlp, src_train_loader, src_val_loader, device, propagate=args.label_prop)
+        model = Model(encoder, mlp)
+        adapter = MultigraphSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
     elif args.method == "selftrain-tgt":
-        adapter = methods.SelfTrainer(encoder, mlp, device=device, propagate=args.label_prop)
+        model = Model(encoder, mlp)
+        adapter = MultigraphSelfTrainer(model, device=device, propagate=args.label_prop)
+    elif args.method == "cbst" or args.method == "crst":
+        model = Model(encoder, mlp)
+        adapter = MultigraphClassBalancedSelfTrainer(model, src_train_loader, src_val_loader, class_num, device, propagate=args.label_prop)
+    elif args.method == "cbst-tgt" or args.method == "crst-tgt":
+        model = Model(encoder, mlp)
+        adapter = MultigraphClassBalancedSelfTrainer(model, num_class=class_num, device=device, propagate=args.label_prop)
     elif args.method == "vat":
         model = Model(encoder, mlp)
         adapter = methods.VirtualAdversarialTrainer(model, src_train_loader, src_val_loader, device)
@@ -111,10 +119,10 @@ def main(args):
         adapter = methods.VirtualAdversarialTrainer(model, device=device)
     elif args.method == "selftrain-vat":
         model = Model(encoder, mlp)
-        adapter = methods.VirtualAdversarialSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
+        adapter = MultigraphVirtualAdversarialSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
     elif args.method == "selftrain-vat-tgt":
         model = Model(encoder, mlp)
-        adapter = methods.VirtualAdversarialSelfTrainer(model, device=device)
+        adapter = MultigraphVirtualAdversarialSelfTrainer(model, device=device, propagate=args.label_prop)
     elif args.method == "selftrain-obvat":
         model = Model(encoder, mlp)
         adapter = methods.OBVATSelfTrainer(model, src_train_loader, src_val_loader, device)
@@ -123,16 +131,16 @@ def main(args):
         adapter = methods.OBVATSelfTrainer(model, device=device)
     elif args.method == "mean-teacher":
         model = Model(encoder, mlp)
-        adapter = methods.MeanTeacherAdapter(model, src_train_loader, src_val_loader, device)
+        adapter = MultigraphMeanTeacherAdapter(model, src_train_loader, src_val_loader, device)
     elif args.method == "mean-teacher-tgt":
         model = Model(encoder, mlp)
-        adapter = methods.MeanTeacherAdapter(model, device=device)
+        adapter = MultigraphMeanTeacherAdapter(model, device=device)
     elif args.method == "fixmatch":
         model = Model(encoder, mlp)
-        adapter = methods.FixMatchAdapter(model, src_train_loader, src_val_loader, device=device)
+        adapter = MultigraphFixMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
     elif args.method == "adamatch":
         model = Model(encoder, mlp)
-        adapter = methods.AdaMatchAdapter(model, src_train_loader, src_val_loader, device=device)
+        adapter = MultigraphAdaMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
     elif args.method == "dirt-t":
         model = Model(encoder, mlp)
         teacher = Model(encoder, mlp)
@@ -167,23 +175,23 @@ def main(args):
         tgt_val_loader = DataLoader(dataset=[load_sbm_dataset(args.data_dir, i) for i in range(train_stage_list[j+1][1], train_stage_list[j+1][2])], batch_size=1, shuffle=True)
 
 
+        stage_name = "_".join([str(e) for e in train_stage_list[j + 1]])
 
-        if args.method == "cbst":
-            reg_weight_list = [0.5]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, train_stage_list[j+1], args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "cbst-tgt":
-            reg_weight_list = [0.5]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, train_stage_list[j+1], args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "selftrain":
+        if args.method == "selftrain" or args.method == "selftrain-tgt":
             threshold_list = [0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, train_stage_list[j+1], args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "selftrain-tgt":
-            threshold_list = [0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, train_stage_list[j+1], args)
-            encoder, mlp = adapter.get_encoder_classifier()
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args, subdir_name=args.shift)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "cbst" or args.method == "cbst-tgt":
+            reg_weight_list = [0]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, stage_name, args, subdir_name=args.shift)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "crst" or args.method == "crst-tgt":
+            reg_weight_list = [0.5]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, stage_name, args, subdir_name=args.shift)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
         elif args.method == "vat" or args.method == "vat-tgt":
             eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
             adapter.adapt(tgt_train_loader, tgt_val_loader, eps_list, train_stage_list[j+1], args)
@@ -191,7 +199,7 @@ def main(args):
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
             eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, eps_list, train_stage_list[j+1], args)
+            adapter.adapt(tgt_train_loader, tgt_val_loader, eps_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "selftrain-obvat" or args.method == "selftrain-obvat-tgt":
@@ -201,19 +209,19 @@ def main(args):
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "mean-teacher" or args.method == "mean-teacher-tgt":
             con_trade_off_list = [0.1, 0.5, 1, 5, 10, 50, 100]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, train_stage_list[j + 1], args)
+            adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "fixmatch":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            con_tradeoff_list = [0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, train_stage_list[j + 1], args)
+            con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "adamatch":
             tau_list = [0.7, 0.8, 0.9]
             mu_list = [0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, train_stage_list[j + 1], args)
+            adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "dirt-t":
