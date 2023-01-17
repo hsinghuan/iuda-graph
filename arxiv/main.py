@@ -10,9 +10,14 @@ from torch_geometric.utils import to_undirected
 
 from dataset import temp_partition_arxiv
 from utils import set_model_seed, get_device
-from model import TwoLayerGraphSAGE, MLPHead
+# from model import TwoLayerGraphSAGE, MLPHead
 from shared import train_stage_list, test_stage_list
 import methods
+
+import sys
+sys.path.append("..")
+from adapter import SinglegraphSelfTrainer, SinglegraphClassBalancedSelfTrainer, SinglegraphVirtualAdversarialSelfTrainer, SinglegraphFixMatchAdapter
+from model import TwoLayerGraphSAGE, MLPHead, Model
 
 def train_epoch(encoder, mlp, optimizer, data):
     encoder.train()
@@ -73,13 +78,33 @@ def main(args):
     dataset = PygNodePropPredDataset(name='ogbn-arxiv', root=args.data_dir)
     data = dataset[0]
     data.edge_index = to_undirected(data.edge_index, data.num_nodes)
+    class_num = 40
     evaluator = Evaluator(name='ogbn-arxiv')
     print("Partition data and train at source")
     src_data = temp_partition_arxiv(data, train_stage_list[0])
+    print("Finish partition")
     encoder, mlp = train_source(src_data, device, evaluator, args)
     acc_list = []
 
-    if args.method == 'jan':
+    if args.method == 'selftrain':
+        model = Model(encoder, mlp)
+        adapter = SinglegraphSelfTrainer(model, src_data, device, propagate=args.label_prop)
+    elif args.method == 'selftrain-tgt':
+        model = Model(encoder, mlp)
+        adapter = SinglegraphSelfTrainer(model, device=device, propagate=args.label_prop)
+    elif args.method == "cbst" or args.method == "crst":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphClassBalancedSelfTrainer(model, src_data, class_num, device, propagate=args.label_prop)
+    elif args.method == "cbst-tgt" or args.method == "crst-tgt":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphClassBalancedSelfTrainer(model, num_class=class_num, device=device, propagate=args.label_prop)
+    elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphVirtualAdversarialSelfTrainer(model, src_data, device, propagate=args.label_prop)
+    elif args.method == "fixmatch":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphFixMatchAdapter(model, src_data, device, propagate=args.label_prop, weak_p=0.01, strong_p=0.02)
+    elif args.method == 'jan':
         adapter = methods.JAN(encoder, mlp, src_data, device)
     elif args.method == 'iwjan-oracle':
         adapter = methods.IWJAN(encoder, mlp, src_data, device, oracle=True)
@@ -87,6 +112,8 @@ def main(args):
         adapter = methods.DANN(encoder, mlp, src_data, args.emb_dim, device)
     elif args.method =='iwdann-oracle':
         adapter = methods.IWDANN(encoder, mlp, src_data, args.emb_dim, device, oracle=True)
+
+
 
     for i, test_stage in enumerate(test_stage_list):
         print("Partition data and test at stage:", test_stage)
@@ -103,10 +130,41 @@ def main(args):
             break
 
         train_stage = train_stage_list[i+1]
+
+        if args.method == "fixed":
+            continue
+
         print("Partition data and adapt at stage:", train_stage)
         tgt_data = temp_partition_arxiv(data, train_stage)
 
-        if args.method == "jan":
+        stage_name = "_".join([str(e) for e in train_stage])
+        if args.method == "selftrain" or args.method == "selftrain-tgt":
+            threshold_list = [0]
+            adapter.adapt(tgt_data, threshold_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "cbst" or args.method == "cbst-tgt":
+            reg_weight_list = [0]
+            adapter.adapt(tgt_data, reg_weight_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "crst" or args.method == "crst-tgt":
+            reg_weight_list = [1]
+            adapter.adapt(tgt_data, reg_weight_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
+            eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
+            adapter.adapt(tgt_data, eps_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "fixmatch":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
+            adapter.adapt(tgt_data, threshold_list, con_tradeoff_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "jan":
             lambda_coeff_list = [0.5, 1, 5]
             adapter.adapt(tgt_data, lambda_coeff_list, train_stage, args)
             encoder, mlp = adapter.get_encoder_classifier()
@@ -122,8 +180,6 @@ def main(args):
             lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_data, lambda_coeff_list, train_stage, args)
             encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "fixed":
-            pass
         else:
             print("Unknown method")
             exit()
@@ -144,6 +200,10 @@ if __name__ == "__main__":
     parser.add_argument("--train_epochs", type=int, help="number of training epochs", default=500)
     parser.add_argument("--adapt_epochs", type=int, help="number of adaptation epochs", default=500)
     parser.add_argument("--adapt_lr", type=float, help="adaptation learning rate", default=1e-3)
+    parser.add_argument("--p_min", type=float, help="initial ratio of unlabeled data being pseudo-labeled", default=0.2)
+    parser.add_argument("--p_max", type=float, help="final ratio of unlabeled data being pseudo-labeled", default=0.5)
+    parser.add_argument("--p_inc", type=float, help="incremental value from p_min to p_max", default=0.05)
+    parser.add_argument("--label_prop", help="whether propagate labels after pseudo-labeling", nargs='?', type=bool, const=1, default=0)
     parser.add_argument("--hidden_dim", type=int, help="GNN hidden layer dimension", default=128)
     parser.add_argument("--emb_dim", type=int, help="embedding dimension", default=256)
     parser.add_argument("--model_seed", type=int, help="random seed", default=42)

@@ -201,6 +201,150 @@ class MultigraphMeanTeacherAdapter(FullModelMultigraphAdapter):
 
 
 
+class SinglegraphMeanTeacherAdapter(FullModelSinglegraphAdapter):
+    def __init__(self, model, src_data=None, device="cpu"):
+        super().__init__(model, src_data, device)
+        self.validator = IMValidator()
+        self.alpha = 0.999
+        self.warm_up_epochs = 10
+
+    def _adapt_train_epoch(self, model, teacher, tgt_data, e, global_step, optimizer, con_trade_off):
+        model.train()
+        teacher.train()
+
+
+        if self.src_data:
+            src_y, _ = model(self.src_data.x, self.src_data.edge_index)
+            src_loss = F.nll_loss(F.log_softmax(src_y[self.src_data.train_mask], dim=1), self.src_data.y[self.src_data.train_mask])
+            src_logits = src_y[self.src_data.train_mask]
+        else:
+            src_loss = torch.tensor(0.0)
+            src_logits = torch.tensor([[]])
+
+        # consistency loss
+        with torch.no_grad():
+            tgt_y_teacher, _ = teacher(tgt_data.x, tgt_data.edge_index)
+
+        tgt_y, _ = model(tgt_data.x, tgt_data.edge_index)
+        tgt_logits = tgt_y[tgt_data.train_mask]
+        con_loss = sigmoid_warm_up(e, self.warm_up_epochs) * F.mse_loss(F.softmax(tgt_y[tgt_data.train_mask], dim=1), F.softmax(tgt_y_teacher[tgt_data.train_mask], dim=1))
+        loss = src_loss + con_trade_off * con_loss
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # update teacher
+        teacher.set_alpha(min(self.alpha, 1 - 1 / global_step))
+        teacher.update()
+        update_bn(model, teacher.teacher)
+        # print("Global step:", global_step, "Alpha:", min(self.alpha, 1 - 1 / global_step), "sigmoid warm up:", sigmoid_warm_up(e, self.warm_up_epochs
+        global_step += 1
+
+
+        return loss.item(), src_loss.item(), con_loss.item(), src_logits, tgt_logits, global_step
+
+    @torch.no_grad()
+    def _adapt_test_epoch(self, model, teacher, tgt_data, e, con_trade_off):
+        model.eval()
+        teacher.eval()
+
+
+        if self.src_data:
+            src_y, _ = model(self.src_data.x, self.src_data.edge_index)
+            src_loss = F.nll_loss(F.log_softmax(src_y[self.src_data.val_mask], dim=1), self.src_data.y[self.src_data.val_mask])
+            src_logits = src_y[self.src_data.val_mask]
+        else:
+            src_loss = torch.tensor(0.0)
+            src_logits = torch.tensor([[]])
+
+        # consistency loss
+        with torch.no_grad():
+            tgt_y_teacher, _ = teacher(tgt_data.x, tgt_data.edge_index)
+
+        tgt_y, _ = model(tgt_data.x, tgt_data.edge_index)
+        tgt_logits = tgt_y[tgt_data.val_mask]
+        con_loss = sigmoid_warm_up(e, self.warm_up_epochs) * F.mse_loss(F.softmax(tgt_y[tgt_data.val_mask], dim=1), F.softmax(tgt_y_teacher[tgt_data.val_mask], dim=1))
+        loss = src_loss + con_trade_off * con_loss
+
+
+        return loss.item(), src_loss.item(), con_loss.item(), src_logits, tgt_logits 
+
+    def _adapt_train_test(self, tgt_data, con_trade_off, args):
+        model = deepcopy(self.model)
+        teacher = EMATeacher(model, alpha=self.alpha)
+        optimizer = torch.optim.Adam(list(model.parameters()), lr=args.adapt_lr)
+
+        best_val_loss = np.inf
+        best_val_score = None
+        best_model = None
+        patience = 10
+        staleness = 0
+        global_step = 1
+
+        for e in range(1, args.adapt_epochs + 1):
+            train_loss, train_src_loss, train_con_loss, train_src_logits, train_tgt_logits, global_step = self._adapt_train_epoch(
+                model, teacher, tgt_data, e, global_step, optimizer, con_trade_off=con_trade_off)
+            val_loss, val_src_loss, val_con_loss, val_src_logits, val_tgt_logits = self._adapt_test_epoch(
+                model, teacher,
+                tgt_data, e, con_trade_off=con_trade_off)
+            train_src_score = self.validator(target_train={'logits': train_src_logits})
+            train_tgt_score = self.validator(target_train={'logits': train_tgt_logits})
+            val_src_score = self.validator(target_train={'logits': val_src_logits})
+            val_tgt_score = self.validator(target_train={'logits': val_tgt_logits})
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_val_score = val_tgt_score
+                best_model = deepcopy(model)
+                staleness = 0
+            else:
+                staleness += 1
+            print(
+                f'Consistency Trade Off: {con_trade_off} Epoch: {e} Train Loss: {round(train_loss, 3)} Train Src Loss: {round(train_src_loss, 3)} Train Con Loss: {round(train_con_loss, 3)} \n Val Loss: {round(val_loss, 3)} Val Src Loss: {round(val_src_loss, 3)} Val Con Loss: {round(val_con_loss, 3)}')
+
+            self.writer.add_scalar("Total Loss/train", train_loss, e)
+            self.writer.add_scalar("Total Loss/val", val_loss, e)
+            self.writer.add_scalar("Source Loss/train", train_src_loss, e)
+            self.writer.add_scalar("Source Loss/val", val_src_loss, e)
+            self.writer.add_scalar("Source Score/train", train_src_score, e)
+            self.writer.add_scalar("Source Score/val", val_src_score, e)
+            self.writer.add_scalar("Target Score/train", train_tgt_score, e)
+            self.writer.add_scalar("Target Score/val", val_tgt_score, e)
+            self.writer.add_scalar("Consistency Loss/train", train_con_loss, e)
+            self.writer.add_scalar("Consistency Loss/val", val_con_loss, e)
+            if staleness > patience:
+                break
+
+        model = deepcopy(best_model)
+
+        return model, best_val_score
+
+
+    def adapt(self, tgt_data, con_trade_off_list, stage_name, args, subdir_name=""):
+        tgt_data = tgt_data.to(self.device)
+        performance_dict = dict()
+        for con_trade_off in con_trade_off_list:
+            run_name = f'{args.method}_{str(con_trade_off)}_{str(args.model_seed)}'
+            self.writer = SummaryWriter(os.path.join(args.log_dir, subdir_name, stage_name, run_name))
+            model, val_score = self._adapt_train_test(tgt_data, con_trade_off, args)
+            performance_dict[con_trade_off] = {'model': model, 'val_score': val_score}
+
+        best_val_score = -np.inf
+        best_model = None
+        for con_trade_off, perf_dict in performance_dict.items():
+            if perf_dict['val_score'] > best_val_score:
+                best_val_score = perf_dict['val_score']
+                best_model = perf_dict['model']
+            print(f"Consistency Tradeoff: {con_trade_off} val_score: {perf_dict['val_score']}")
+        self.set_model(best_model)
+
+
+
+
+
+
+
+
 def set_requires_grad(net, requires_grad=False):
     """
     Set requires_grad=False for all the parameters to avoid unnecessary computations

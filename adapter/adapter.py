@@ -1,4 +1,5 @@
 from copy import deepcopy
+from torch_geometric.loader import DataLoader
 
 
 class FullModelSinglegraphAdapter():
@@ -6,6 +7,9 @@ class FullModelSinglegraphAdapter():
         self.device = device
         self.set_model(model)
         self.src_data = src_data
+        if self.src_data:
+            self.src_data = self.src_data.to(self.device)
+
 
     def _adapt_train_epoch(self):
         raise NotImplementedError("Subclass should implement this")
@@ -32,6 +36,7 @@ class FullModelMultigraphAdapter():
         self.src_train_loader = src_train_loader
         self.src_val_loader = src_val_loader
 
+
     def _adapt_train_epoch(self):
         raise NotImplementedError("Subclass should implement this")
 
@@ -56,6 +61,8 @@ class DecoupledSinglegraphAdapter():
         self.device = device
         self.set_encoder_classifier(encoder, classifier)
         self.src_data = src_data
+        if self.src_data:
+            self.src_data = self.src_data.to(self.device)
 
     def _adapt_train_epoch(self):
         raise NotImplementedError("Subclass should implement this")
