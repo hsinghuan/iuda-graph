@@ -1,6 +1,7 @@
 import torch
 import random
 import numpy as np
+import os
 
 def set_model_seed(random_seed:int):
     torch.manual_seed(random_seed)
@@ -9,6 +10,7 @@ def set_model_seed(random_seed:int):
     torch.backends.cudnn.benchmark = False
     np.random.seed(random_seed)
     random.seed(random_seed)
+    os.environ['PYTHONHASHSEED'] = str(random_seed)
 
 
 def get_device(gpuID:int):

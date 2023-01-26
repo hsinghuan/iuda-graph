@@ -16,7 +16,7 @@ import methods
 
 import sys
 sys.path.append("..")
-from adapter import SinglegraphSelfTrainer, SinglegraphClassBalancedSelfTrainer, SinglegraphVirtualAdversarialSelfTrainer, SinglegraphFixMatchAdapter
+from adapter import *
 from model import TwoLayerGraphSAGE, MLPHead, Model
 
 def train_epoch(encoder, mlp, optimizer, data):
@@ -98,18 +98,30 @@ def main(args):
     elif args.method == "cbst-tgt" or args.method == "crst-tgt":
         model = Model(encoder, mlp)
         adapter = SinglegraphClassBalancedSelfTrainer(model, num_class=class_num, device=device, propagate=args.label_prop)
-    elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
+    elif args.method == "mean-teacher":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphMeanTeacherAdapter(model, src_data, device) 
+    elif args.method == "mean-teacher-tgt":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphMeanTeacherAdapter(model, device=device) 
+    elif args.method == "selftrain-vat":
         model = Model(encoder, mlp)
         adapter = SinglegraphVirtualAdversarialSelfTrainer(model, src_data, device, propagate=args.label_prop)
+    elif args.method == "selftrain-vat-tgt":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphVirtualAdversarialSelfTrainer(model, device=device, propagate=args.label_prop)
     elif args.method == "fixmatch":
         model = Model(encoder, mlp)
         adapter = SinglegraphFixMatchAdapter(model, src_data, device, propagate=args.label_prop, weak_p=0.01, strong_p=0.02)
+    elif args.method == "adamatch":
+        model = Model(encoder, mlp)
+        adapter = SinglegraphAdaMatchAdapter(model, src_data, device, propagate=args.label_prop, weak_p=0.01, strong_p=0.02)
     elif args.method == 'jan':
         adapter = methods.JAN(encoder, mlp, src_data, device)
     elif args.method == 'iwjan-oracle':
         adapter = methods.IWJAN(encoder, mlp, src_data, device, oracle=True)
     elif args.method == 'dann':
-        adapter = methods.DANN(encoder, mlp, src_data, args.emb_dim, device)
+        adapter = SinglegraphDANNAdapter(encoder, mlp, src_data, args.emb_dim, device)
     elif args.method =='iwdann-oracle':
         adapter = methods.IWDANN(encoder, mlp, src_data, args.emb_dim, device, oracle=True)
 
@@ -153,6 +165,11 @@ def main(args):
             adapter.adapt(tgt_data, reg_weight_list, stage_name, args)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "mean-teacher" or args.method == "mean-teacher-tgt":
+            con_trade_off_list = [0.1, 0.5, 1, 5, 10, 50, 100]
+            adapter.adapt(tgt_data, con_trade_off_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
         elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
             eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
             adapter.adapt(tgt_data, eps_list, stage_name, args)
@@ -162,6 +179,12 @@ def main(args):
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
             adapter.adapt(tgt_data, threshold_list, con_tradeoff_list, stage_name, args)
+            model = adapter.get_model()
+            encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "adamatch":
+            tau_list = [0.7, 0.8, 0.9]
+            mu_list = [0.1, 0.5, 1]
+            adapter.adapt(tgt_data, tau_list, mu_list, stage_name, args)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
         elif args.method == "jan":
@@ -174,7 +197,7 @@ def main(args):
             encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "dann":
             lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            adapter.adapt(tgt_data, lambda_coeff_list, train_stage, args)
+            adapter.adapt(tgt_data, lambda_coeff_list, stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "iwdann-oracle":
             lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]

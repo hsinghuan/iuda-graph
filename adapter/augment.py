@@ -13,7 +13,7 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 class DropFeatures:
     r"""Drops node features with probability p."""
     def __init__(self, p=None, precomputed_weights=True):
-        assert 0. < p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
+        assert 0. <= p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
         self.p = p
 
     def __call__(self, data):
@@ -28,7 +28,7 @@ class DropFeatures:
 class DropEdges:
     r"""Drops edges with probability p."""
     def __init__(self, p, force_undirected=False):
-        assert 0. < p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
+        assert 0. <= p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
 
         self.p = p
         self.force_undirected = force_undirected
@@ -51,7 +51,7 @@ class DropEdges:
 
 class DropNodes:
     def __init__(self, p):
-        assert 0. < p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
+        assert 0. <= p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
         self.p = p
 
     def __call__(self, data):
@@ -84,7 +84,7 @@ class DropNodes:
 
 class AddEdges:
     def __init__(self, p):
-        assert 0. < p < 1., 'Add edge probability has to be between 0 and 1, but got %.2f' % p
+        assert 0. <= p < 1., 'Add edge probability has to be between 0 and 1, but got %.2f' % p
         self.p = p
 
     def __call__(self, data):
@@ -108,7 +108,7 @@ class Subgraph:
     Modified from https://github.com/Shen-Lab/GraphCL_Automated/blob/master/unsupervised_TU/aug.py
     """
     def __init__(self, p):
-        assert 0. < p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
+        assert 0. <= p < 1., 'Dropout probability has to be between 0 and 1, but got %.2f' % p
         self.p = p
 
     def __call__(self, data):

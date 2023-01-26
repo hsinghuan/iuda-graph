@@ -291,7 +291,7 @@ class SinglegraphSelfTrainer(FullModelSinglegraphAdapter):
         tgt_loss = F.nll_loss(F.log_softmax(tgt_y[pseudo_tgt_val_mask], dim=1),
                               pseudo_tgt_label[pseudo_tgt_val_mask], reduction='sum')
         tgt_node_num = pseudo_tgt_val_mask.sum().item()
-        tgt_logits = tgt_y[tgt_y.val_mask]
+        tgt_logits = tgt_y[tgt_data.val_mask]
 
 
         loss = src_loss + tgt_loss

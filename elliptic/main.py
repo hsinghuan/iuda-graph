@@ -13,7 +13,7 @@ from shared import train_stage_list, test_stage_list
 
 import sys
 sys.path.append("..")
-from adapter import MultigraphSelfTrainer, MultigraphVirtualAdversarialSelfTrainer, MultigraphClassBalancedSelfTrainer, MultigraphMeanTeacherAdapter, MultigraphFixMatchAdapter, MultigraphAdaMatchAdapter
+from adapter import *
 from model import TwoLayerGraphSAGE, MLPHead, Model
 
 def get_data(data_dir:str, sub_dataset:int):
@@ -120,9 +120,16 @@ def main(args):
     elif args.method == "fixmatch":
         model = Model(encoder, mlp)
         adapter = MultigraphFixMatchAdapter(model, src_train_loader, src_val_loader, device, weak_p=0.01, strong_p=0.02)
+    elif args.method == "fixmatch-tgt":
+        model = Model(encoder, mlp)
+        adapter = MultigraphFixMatchAdapter(model, device=device, weak_p=0.01, strong_p=0.02)
     elif args.method == "adamatch":
         model = Model(encoder, mlp)
         adapter = MultigraphAdaMatchAdapter(model, src_train_loader, src_val_loader, device, weak_p=0.01, strong_p=0.02)
+    elif args.method == "selftrain-clf" or args.method == "goat": # essentially GOAT without intermediate domains, tuning the classifier only
+        adapter = MultigraphGOATAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "dann":
+        adapter = MultigraphDANNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, device=device)
 
 
     for j, test_stage in enumerate(test_stage_list):
@@ -173,7 +180,7 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, stage_name, args)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "fixmatch":
+        elif args.method == "fixmatch" or args.method == "fixmatch-tgt":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
             adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, stage_name, args)
@@ -185,6 +192,20 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, stage_name, args)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "selftrain-clf":
+            threshold_list = [0]
+            interdomain_num_list = [0]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "goat":
+            threshold_list = [0]
+            interdomain_num_list = [8]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "dann":
+            lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, lambda_coeff_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "fixed":
             pass
         else:

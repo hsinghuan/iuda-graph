@@ -12,7 +12,7 @@ import methods
 
 import sys
 sys.path.append("..")
-from adapter import MultigraphSelfTrainer, MultigraphVirtualAdversarialSelfTrainer, MultigraphClassBalancedSelfTrainer, MultigraphMeanTeacherAdapter, MultigraphFixMatchAdapter, MultigraphAdaMatchAdapter
+from adapter import *
 from model import TwoLayerGraphSAGE, MLPHead, Model
 
 def train(encoder, mlp, optimizer, loader, device="cpu"):
@@ -138,9 +138,16 @@ def main(args):
     elif args.method == "fixmatch":
         model = Model(encoder, mlp)
         adapter = MultigraphFixMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
+    elif args.method == "fixmatch-tgt":
+        model = Model(encoder, mlp)
+        adapter = MultigraphFixMatchAdapter(model, device=device, weak_p=0.01, strong_p=0.02)
     elif args.method == "adamatch":
         model = Model(encoder, mlp)
         adapter = MultigraphAdaMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
+    elif args.method == "selftrain-clf" or args.method == "goat": # essentially GOAT without intermediate domains, tuning the classifier only
+        adapter = MultigraphGOATAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "dann":
+        adapter = MultigraphDANNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, device=device)
     elif args.method == "dirt-t":
         model = Model(encoder, mlp)
         teacher = Model(encoder, mlp)
@@ -212,7 +219,7 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "fixmatch":
+        elif args.method == "fixmatch" or args.method == "fixmatch-tgt":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
             adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, stage_name, args, subdir_name=args.shift)
@@ -224,6 +231,20 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
+        elif args.method == "selftrain-clf":
+            threshold_list = [0]
+            interdomain_num_list = [0]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "goat":
+            threshold_list = [0]
+            interdomain_num_list = [0, 1, 2, 4, 8]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "dann":
+            lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, lambda_coeff_list, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "dirt-t":
             pass
         elif args.method == "fixed":
@@ -245,7 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--result_dir", type=str, help="path to performance results directory", default="results")
     parser.add_argument("--method", type=str, help="adaptation method")
     parser.add_argument("--train_epochs", type=int, help="number of training epochs", default=500)
-    parser.add_argument("--adapt_epochs", type=int, help="number of adaptation epochs", default=50)
+    parser.add_argument("--adapt_epochs", type=int, help="number of adaptation epochs", default=500)
     parser.add_argument("--adapt_lr", type=float, help="learning rate for adaptation optimizer", default=1e-3)
     parser.add_argument("--p_min", type=float, help="initial ratio of unlabeled data being pseudo-labeled", default=0.2)
     parser.add_argument("--p_max", type=float, help="final ratio of unlabeled data being pseudo-labeled", default=0.5)

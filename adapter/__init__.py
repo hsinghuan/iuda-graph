@@ -3,4 +3,6 @@ from .selftrain_vat import MultigraphVirtualAdversarialSelfTrainer, SinglegraphV
 from .cbst import MultigraphClassBalancedSelfTrainer, SinglegraphClassBalancedSelfTrainer
 from .mean_teacher import MultigraphMeanTeacherAdapter, SinglegraphMeanTeacherAdapter
 from .fixmatch import MultigraphFixMatchAdapter, SinglegraphFixMatchAdapter
-from .adamatch import MultigraphAdaMatchAdapter
+from .adamatch import MultigraphAdaMatchAdapter, SinglegraphAdaMatchAdapter
+from .goat import MultigraphGOATAdapter
+from .dann import SinglegraphDANNAdapter, MultigraphDANNAdapter
