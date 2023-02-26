@@ -6,9 +6,11 @@ import copy
 import numpy as np
 import torch
 from torch_geometric.utils.dropout import dropout_edge, dropout_node, subgraph
-from torch_geometric.utils import add_random_edge
-from torch_geometric.transforms import Compose
+from torch_geometric.utils import add_random_edge, add_self_loops
+from torch_geometric.transforms import Compose, GDC
+from torch_sparse import coalesce
 from torch_geometric.utils.num_nodes import maybe_num_nodes
+
 
 class DropFeatures:
     r"""Drops node features with probability p."""
@@ -164,6 +166,61 @@ class Subgraph:
         return '{}(p={})'.format(self.__class__.__name__, self.p)
 
 
+class PPRDiffusion:
+    def __init__(self, alpha=0.2, eps=1e-4, add_self_loop=True):
+        self.alpha = alpha
+        self.eps = eps
+        self.add_self_loop = add_self_loop
+
+    def __call__(self, data):
+        edge_index, _ = self.compute_ppr(
+                    data.edge_index,
+                    alpha=self.alpha, eps=self.eps, add_self_loop=self.add_self_loop
+                )
+
+        data.edge_index = edge_index.to(data.edge_index.device)
+        return data
+
+    def compute_ppr(self, edge_index, edge_weight=None, alpha=0.2, eps=0.1, ignore_edge_attr=True, add_self_loop=True):
+        N = edge_index.max().item() + 1
+        if ignore_edge_attr or edge_weight is None:
+            edge_weight = torch.ones(
+                edge_index.size(1), device=edge_index.device)
+        if add_self_loop:
+            edge_index, edge_weight = add_self_loops(
+                edge_index, edge_weight, fill_value=1, num_nodes=N)
+            edge_index, edge_weight = coalesce(edge_index, edge_weight, N, N)
+        edge_index, edge_weight = coalesce(edge_index, edge_weight, N, N)
+        edge_index, edge_weight = GDC().transition_matrix(
+            edge_index, edge_weight, N, normalization='sym')
+        diff_mat = GDC().diffusion_matrix_exact(
+            edge_index, edge_weight, N, method='ppr', alpha=alpha)
+        edge_index, edge_weight = GDC().sparsify_dense(diff_mat, method='threshold', eps=eps)
+        edge_index, edge_weight = coalesce(edge_index, edge_weight, N, N)
+        edge_index, edge_weight = GDC().transition_matrix(
+            edge_index, edge_weight, N, normalization='sym')
+
+        return edge_index, edge_weight
+
+class PPRDiffusion2:
+    def __init__(self, alpha=0.2, eps=1e-3, add_self_loop=True, exact=True):
+        self.alpha = alpha
+        self.eps = eps
+        self.add_self_loop = add_self_loop
+        self.exact = exact
+        self.transform = GDC(
+            self_loop_weight=1,
+            normalization_in='sym',
+            normalization_out='col',
+            diffusion_kwargs=dict(method='ppr', alpha=alpha, eps=eps),
+            sparsification_kwargs=dict(method='threshold', eps=eps),
+            exact=exact,
+        )
+    def __call__(self, data):
+        data = self.transform(data)
+        return data
+
+
 def get_graph_drop_transform(drop_edge_p, drop_feat_p):
     transforms = list()
 
@@ -178,6 +235,8 @@ def get_graph_drop_transform(drop_edge_p, drop_feat_p):
     if drop_feat_p > 0.:
         transforms.append(DropFeatures(drop_feat_p))
     return Compose(transforms)
+
+
 
 
 class WeakAugmentor():
@@ -428,12 +487,71 @@ class StrongAugmentor():
             print("node mask:", data.node_mask)
         return data
 
-# from torch_geometric.data import Data
-# from copy import deepcopy
+import os
+from torch_geometric.data import Data
+from copy import deepcopy
+
+
+def set_model_seed(random_seed:int):
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+    os.environ['PYTHONHASHSEED'] = str(random_seed)
+
+# set_model_seed(21)
 # sa = StrongAugmentor()
+# x = torch.randn(8,4)
+# edge_index = torch.tensor([[0,0,1,1,2,2,2,3,3,4,4,5,5,6,6,6,7,7],
+#                            [2,6,0,7,3,4,6,1,5,2,3,1,6,1,2,4,5,6]])
+# data = Data(x=x, edge_index=edge_index)
+# #
+# data = sa.test_dropnodes(deepcopy(data))
+# print(data.edge_index)
+
+# ppr_diff = PPRDiffusion2(exact=False)
 # x = torch.randn(8,4)
 # edge_index = torch.tensor([[0,0,1,1,2,2,2,3,3,4,4,5,5,6,6,6,7,7], [2,6,0,7,3,4,6,1,5,2,3,1,6,1,2,4,5,6]])
 # data = Data(x=x, edge_index=edge_index)
-# #
-# data = sa.test_addedges_subgraph(deepcopy(data))
+# data_aug1 = ppr_diff(deepcopy(data))
+# data_aug2 = ppr_diff(deepcopy(data))
+# print("original edge index:", edge_index)
+# print("new edge index 1:", data_aug1.edge_index)
+# print("new edge index 2:", data_aug2.edge_index)
 #
+# def merge_src_tgt(src_data, tgt_data): # merge source / target while considering train/val mask
+#     src_node_num = src_data.x.shape[0]
+#     x = torch.cat([src_data.x, tgt_data.x], dim=0)
+#     tgt_edge_index = tgt_data.edge_index + torch.ones_like(tgt_data.edge_index) * src_node_num
+#     edge_index = torch.cat([src_data.edge_index, tgt_edge_index], dim=1)
+#     train_mask = torch.cat([src_data.train_mask, tgt_data.train_mask])
+#     val_mask = torch.cat([src_data.val_mask, tgt_data.val_mask])
+#     data = Data(x = x, edge_index=edge_index, train_mask=train_mask, val_mask=val_mask)
+#     return data
+#
+# x = torch.randn(8,4)
+# print("x1", x)
+# edge_index = torch.tensor([[0,1,1,2,3,4,4,5,5,6,7],
+#                            [2,6,7,1,5,2,3,4,6,7,1]])
+# train_mask = torch.tensor([0,1,1,1,0,0,1,1], dtype=torch.bool)
+# val_mask = torch.tensor([1,0,0,0,1,1,0,0], dtype=torch.bool)
+# data1 = Data(x=x, edge_index=edge_index, train_mask=train_mask, val_mask=val_mask)
+#
+# x = torch.randn(4,4)
+# print("x2", x)
+# edge_index = torch.tensor([[0,0,1,2,3],
+#                            [1,2,3,0,1]])
+# train_mask = torch.tensor([0,1,1,0], dtype=torch.bool)
+# val_mask = torch.tensor([1,0,0,1], dtype=torch.bool)
+# data2 = Data(x=x, edge_index=edge_index, train_mask=train_mask, val_mask=val_mask)
+#
+# merged = merge_src_tgt(data1, data2)
+# print(merged.x)
+# print(merged.edge_index)
+# print(merged.train_mask)
+# print(merged.val_mask)
+#
+# print(data1.edge_index)
+# print(data2.edge_index)
