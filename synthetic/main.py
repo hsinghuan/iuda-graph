@@ -8,12 +8,12 @@ from torch_geometric.loader import DataLoader
 from utils import set_model_seed, get_device
 from dataset import load_sbm_dataset
 from shared import train_stage_list, test_stage_list
-import methods
+import numpy as np
 
 import sys
 sys.path.append("..")
 from adapter import *
-from model import TwoLayerGraphSAGE, MLPHead, Model
+from model import TwoLayerGraphSAGE, TwoLayerMLP, Model
 
 def train(encoder, mlp, optimizer, loader, device="cpu"):
     encoder.train()
@@ -65,10 +65,10 @@ def train_source(source_stage, device, args):
 
     feat_dim = train_data_list[0].x.shape[1]
     hidden_dim = args.hidden_dim
-    class_num = 3 if args.shift == "sbmb" else 2
+    class_num = 3 if args.shift == "sbmb" or "sbmb_ys" else 2
     emb_dim = args.emb_dim
     encoder = TwoLayerGraphSAGE(feat_dim, hidden_dim, emb_dim).to(device)
-    mlp = MLPHead(emb_dim, emb_dim // 4, class_num).to(device)
+    mlp = TwoLayerMLP(emb_dim, emb_dim // 4, class_num).to(device)
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(mlp.parameters()), lr=1e-3)
 
     train_loader = DataLoader(dataset=train_data_list, batch_size=1, shuffle=True)
@@ -96,66 +96,61 @@ def main(args):
     device = get_device(args.gpuID)
 
     encoder, mlp, src_train_loader, src_val_loader = train_source(train_stage_list[0], device, args)
-    class_num = 3 if args.shift == "sbmb" else 2
+    class_num = 3 if args.shift == "sbmb" or "sbmb_ys" else 2
 
-    if args.method == "selftrain":
-        # adapter = methods.SelfTrainer(encoder, mlp, src_train_loader, src_val_loader, device, propagate=args.label_prop)
+    @torch.no_grad()
+    def dump_feature_y(loader, stage_name, subdir_name):
+        encoder.eval()
+        mlp.eval()
+        feature = []
+        y = []
+        for data in loader:
+            data = data.to(device)
+            f = encoder(data.x, data.edge_index)
+            pred, _ = mlp(f)
+            feature.append(f)
+            y.append(torch.argmax(pred, dim=1))
+        feature = torch.cat(feature, dim=0).detach().cpu().numpy()
+        y = torch.cat(y).detach().cpu().numpy()
+        os.makedirs(os.path.join("feature_y", stage_name, subdir_name), exist_ok=True)
+
+        feat_filename = args.method + "_" + str(args.model_seed) + "_feat.npy"
+        y_filename = args.method + "_" + str(args.model_seed) + "_y.npy"
+        np.save(os.path.join("feature_y", stage_name, subdir_name, feat_filename), feature)
+        np.save(os.path.join("feature_y", stage_name, subdir_name, y_filename), y)
+
+    if args.analyze_feat:
+        dump_feature_y(src_train_loader, "_".join([str(e) for e in train_stage_list[0]]), args.shift)
+
+
+    if args.method == "gcst-fpl":
+        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-upl":
+        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-fpl-wo-src":
+        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-upl-wo-src":
+        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-fpl-wo-con":
+        adapter = MultigraphGCSTFPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-upl-wo-con":
+        adapter = MultigraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-wo-pl":
+        adapter = MultigraphGCSTXPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gst":
         model = Model(encoder, mlp)
-        adapter = MultigraphSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
-    elif args.method == "selftrain-tgt":
-        model = Model(encoder, mlp)
-        adapter = MultigraphSelfTrainer(model, device=device, propagate=args.label_prop)
+        adapter = MultigraphGST(model, device=device)
     elif args.method == "cbst" or args.method == "crst":
         model = Model(encoder, mlp)
-        adapter = MultigraphClassBalancedSelfTrainer(model, src_train_loader, src_val_loader, class_num, device, propagate=args.label_prop)
-    elif args.method == "cbst-tgt" or args.method == "crst-tgt":
-        model = Model(encoder, mlp)
-        adapter = MultigraphClassBalancedSelfTrainer(model, num_class=class_num, device=device, propagate=args.label_prop)
-    elif args.method == "vat":
-        model = Model(encoder, mlp)
-        adapter = methods.VirtualAdversarialTrainer(model, src_train_loader, src_val_loader, device)
-    elif args.method == "vat-tgt":
-        model = Model(encoder, mlp)
-        adapter = methods.VirtualAdversarialTrainer(model, device=device)
-    elif args.method == "selftrain-vat":
-        model = Model(encoder, mlp)
-        adapter = MultigraphVirtualAdversarialSelfTrainer(model, src_train_loader, src_val_loader, device, propagate=args.label_prop)
-    elif args.method == "selftrain-vat-tgt":
-        model = Model(encoder, mlp)
-        adapter = MultigraphVirtualAdversarialSelfTrainer(model, device=device, propagate=args.label_prop)
-    elif args.method == "selftrain-obvat":
-        model = Model(encoder, mlp)
-        adapter = methods.OBVATSelfTrainer(model, src_train_loader, src_val_loader, device)
-    elif args.method == "selftrain-obvat-tgt":
-        model = Model(encoder, mlp)
-        adapter = methods.OBVATSelfTrainer(model, device=device)
-    elif args.method == "mean-teacher":
-        model = Model(encoder, mlp)
-        adapter = MultigraphMeanTeacherAdapter(model, src_train_loader, src_val_loader, device)
-    elif args.method == "mean-teacher-tgt":
-        model = Model(encoder, mlp)
-        adapter = MultigraphMeanTeacherAdapter(model, device=device)
-    elif args.method == "fixmatch":
-        model = Model(encoder, mlp)
-        adapter = MultigraphFixMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
-    elif args.method == "fixmatch-tgt":
-        model = Model(encoder, mlp)
-        adapter = MultigraphFixMatchAdapter(model, device=device, weak_p=0.01, strong_p=0.02)
-    elif args.method == "adamatch":
-        model = Model(encoder, mlp)
-        adapter = MultigraphAdaMatchAdapter(model, src_train_loader, src_val_loader, device=device, weak_p=0.01, strong_p=0.02)
-    elif args.method == "selftrain-clf" or args.method == "goat": # essentially GOAT without intermediate domains, tuning the classifier only
-        adapter = MultigraphGOATAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+        adapter = MultigraphClassBalancedSelfTrainer(model, src_train_loader, src_val_loader, class_num, device)
     elif args.method == "dann":
         adapter = MultigraphDANNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, device=device)
-    elif args.method == "dirt-t":
-        model = Model(encoder, mlp)
-        teacher = Model(encoder, mlp)
-        adapter = methods.DIRTTAdapter(model, teacher, device, vat=False)
-    elif args.method == "dirt-t-vat":
-        model = Model(encoder, mlp)
-        teacher = Model(encoder, mlp)
-        adapter = methods.DIRTTAdapter(model, teacher, device, vat=True)
+    elif args.method == "jan":
+        adapter = MultigraphJANAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "deep-coral":
+        adapter = MultigraphDeepCORALAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "uda-gcn":
+        adapter = MultigraphUDAGCNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, path_len=5, device=device)
 
 
     test_acc_list = []
@@ -181,74 +176,66 @@ def main(args):
         tgt_train_loader = DataLoader(dataset=[load_sbm_dataset(args.data_dir, i) for i in range(train_stage_list[j+1][0], train_stage_list[j+1][1])], batch_size=1, shuffle=True)
         tgt_val_loader = DataLoader(dataset=[load_sbm_dataset(args.data_dir, i) for i in range(train_stage_list[j+1][1], train_stage_list[j+1][2])], batch_size=1, shuffle=True)
 
-
         stage_name = "_".join([str(e) for e in train_stage_list[j + 1]])
 
-        if args.method == "selftrain" or args.method == "selftrain-tgt":
-            threshold_list = [0]
+
+
+        if args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-wo-pl":
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gst":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "cbst" or args.method == "cbst-tgt":
+        elif args.method == "cbst":
             reg_weight_list = [0]
             adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "crst" or args.method == "crst-tgt":
+        elif args.method == "crst":
             reg_weight_list = [0.5]
             adapter.adapt(tgt_train_loader, tgt_val_loader, reg_weight_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
             encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "vat" or args.method == "vat-tgt":
-            eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, eps_list, train_stage_list[j+1], args)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "selftrain-vat" or args.method == "selftrain-vat-tgt":
-            eps_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 1.0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, eps_list, stage_name, args, subdir_name=args.shift)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "selftrain-obvat" or args.method == "selftrain-obvat-tgt":
-            gamma_list = [0.001, 0.005, 0.01, 0.05, 0.1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, gamma_list, train_stage_list[j + 1], args)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "mean-teacher" or args.method == "mean-teacher-tgt":
-            con_trade_off_list = [0.1, 0.5, 1, 5, 10, 50, 100]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, con_trade_off_list, stage_name, args, subdir_name=args.shift)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "fixmatch" or args.method == "fixmatch-tgt":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            con_tradeoff_list = [0.05, 0.1, 0.5, 1, 5]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, con_tradeoff_list, stage_name, args, subdir_name=args.shift)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "adamatch":
-            tau_list = [0.7, 0.8, 0.9]
-            mu_list = [0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, tau_list, mu_list, stage_name, args, subdir_name=args.shift)
-            model = adapter.get_model()
-            encoder, mlp = model.get_encoder_classifier()
-        elif args.method == "selftrain-clf":
-            threshold_list = [0]
-            interdomain_num_list = [0]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "goat":
-            threshold_list = [0]
-            interdomain_num_list = [0, 1, 2, 4, 8]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, interdomain_num_list, stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "dann":
             lambda_coeff_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_train_loader, tgt_val_loader, lambda_coeff_list, stage_name, args, subdir_name=args.shift)
             encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "dirt-t":
-            pass
+        elif args.method == "jan":
+            jmmd_tradeoff_list = [0.5, 1, 5]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, jmmd_tradeoff_list, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "deep-coral":
+            coral_tradeoff_list = [0.5, 1, 5]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, coral_tradeoff_list, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "uda-gcn":
+            adapter.adapt(tgt_train_loader, tgt_val_loader, stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "fixed":
             pass
+        if args.analyze_feat:
+            dump_feature_y(tgt_train_loader, stage_name, args.shift)
 
     print("Test Acc List:", test_acc_list)
     print("Avg Acc List:", sum(test_acc_list)/len(test_acc_list))
@@ -271,7 +258,7 @@ if __name__ == "__main__":
     parser.add_argument("--p_min", type=float, help="initial ratio of unlabeled data being pseudo-labeled", default=0.2)
     parser.add_argument("--p_max", type=float, help="final ratio of unlabeled data being pseudo-labeled", default=0.5)
     parser.add_argument("--p_inc", type=float, help="incremental value from p_min to p_max", default=0.05)
-    parser.add_argument("--label_prop", help="whether propagate labels after pseudo-labeling", nargs='?', type=bool, const=1, default=0)
+    parser.add_argument("--analyze_feat", help="whether save features", nargs='?', type=bool, const=1, default=0)
     parser.add_argument("--hidden_dim", type=int, help="GNN hidden layer dimension", default=64)
     parser.add_argument("--emb_dim", type=int, help="embedding dimension", default=64)
     parser.add_argument("--model_seed", type=int, help="random seed", default=42)
