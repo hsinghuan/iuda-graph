@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-class MLPHead(nn.Module):
+class TwoLayerMLP(nn.Module):
     def __init__(self, in_dim, hidden_dim, out_dim, dropout=0.2):
         super().__init__()
         self.dropout = dropout
@@ -19,4 +19,17 @@ class MLPHead(nn.Module):
         output = self.linear2(x1)
         # x = F.softmax(x, dim=1)
         features = x1
+        return output, features
+
+class OneLayerMLP(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear1 = nn.Linear(in_dim, out_dim)
+
+    def reset_parameters(self):
+        self.linear1.reset_parameters()
+
+    def forward(self, x):
+        output = self.linear1(x)
+        features = x
         return output, features

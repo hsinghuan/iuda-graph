@@ -10,6 +10,8 @@ class TwoLayerGraphSAGE(nn.Module):
         self.dropout = dropout
         self.conv1 = SAGEConv(in_dim, hidden_dim)
         self.conv2 = SAGEConv(hidden_dim, out_dim)
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
 
     def reset_parameters(self):
         self.conv1.reset_parameters()
@@ -23,3 +25,9 @@ class TwoLayerGraphSAGE(nn.Module):
         x = self.conv2(x, edge_index)
         x = F.elu(x)
         return x
+
+    def get_input_dim(self):
+        return self.in_dim
+
+    def get_hidden_dim(self):
+        return self.hidden_dim
