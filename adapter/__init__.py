@@ -8,3 +8,4 @@ from .cbst import MultigraphClassBalancedSelfTrainer, SinglegraphClassBalancedSe
 from .jan import MultigraphJANAdapter, SinglegraphJANAdapter
 from .dann import SinglegraphDANNAdapter, MultigraphDANNAdapter
 from .coral import SinglegraphDeepCORALAdapter, MultigraphDeepCORALAdapter
+from .udagcn import MultigraphUDAGCNAdapter, SinglegraphUDAGCNAdapter
