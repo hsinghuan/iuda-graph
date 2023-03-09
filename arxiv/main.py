@@ -111,22 +111,7 @@ def main(args):
 
 
 
-
-    if args.method == "gcst-fpl":
-        adapter = SinglegraphGCSTFPL(encoder, mlp, args.emb_dim, src_data, device=device)
-    elif args.method == "gcst-upl":
-        adapter = SinglegraphGCSTUPL(encoder, mlp, args.emb_dim, src_data, device=device)
-    elif args.method == "gcst-fpl-wo-con":
-        adapter = SinglegraphGCSTFPLXCON(encoder, mlp, args.emb_dim, src_data, device=device)
-    elif args.method == "gcst-upl-wo-con":
-        adapter = SinglegraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_data, device=device)
-    elif args.method == "gcst-fpl-wo-src":
-        adapter = SinglegraphGCSTFPL(encoder, mlp, args.emb_dim, device=device)
-    elif args.method == "gcst-upl-wo-src":
-        adapter = SinglegraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
-    elif args.method == "gcst-wo-pl":
-        adapter = SinglegraphGCSTXPL(encoder, mlp, args.emb_dim, device=device)
-    elif args.method =='gst':
+    if args.method =='gst':
         model = Model(encoder, mlp)
         adapter = SinglegraphGST(model, device=device)
     elif args.method == "cbst" or args.method == "crst":
@@ -140,6 +125,22 @@ def main(args):
         adapter = SinglegraphDeepCORALAdapter(encoder, mlp, src_data, device=device)
     elif args.method == "uda-gcn":
         adapter = SinglegraphUDAGCNAdapter(encoder, mlp, src_data, args.emb_dim, path_len=10, device=device)
+    elif args.method == "gcst-fpl":
+        adapter = SinglegraphGCSTFPL(encoder, mlp, args.emb_dim, src_data, device=device)
+    elif args.method == "gcst-upl":
+        adapter = SinglegraphGCSTUPL(encoder, mlp, args.emb_dim, src_data, device=device)
+    elif args.method == "gcst-fpl-wo-con":
+        adapter = SinglegraphGCSTFPLXCON(encoder, mlp, args.emb_dim, src_data, device=device)
+    elif args.method == "gcst-upl-wo-con":
+        adapter = SinglegraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_data, device=device)
+    elif args.method == "gcst-fpl-wo-src":
+        adapter = SinglegraphGCSTFPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-upl-wo-src":
+        adapter = SinglegraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-wo-pl":
+        adapter = SinglegraphGCSTXPL(encoder, mlp, args.emb_dim, device=device)
+
+
 
 
 
@@ -169,26 +170,7 @@ def main(args):
         stage_name = "_".join([str(e) for e in train_stage])
 
 
-
-        if args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_data, threshold_list, contrast_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_data, threshold_list, contrast_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            adapter.adapt(tgt_data, threshold_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-wo-pl":
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_data, contrast_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gst":
+        if args.method == "gst":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_data, threshold_list, stage_name, args)
             model = adapter.get_model()
@@ -217,6 +199,24 @@ def main(args):
             encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "uda-gcn":
             adapter.adapt(tgt_data, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_data, threshold_list, contrast_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_data, threshold_list, contrast_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_data, threshold_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-wo-pl":
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_data, contrast_list, stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
         else:
             print("Unknown method")
