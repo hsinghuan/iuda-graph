@@ -130,8 +130,7 @@ class MultigraphGST(FullModelMultigraphAdapter):
     def adapt(self, tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args, subdir_name=""):
         performance_dict = dict()
         for thres in threshold_list:
-            lp = "lp" if args.label_prop else ""
-            run_name = f'{args.method}_{lp}_{str(thres)}_{str(args.model_seed)}'
+            run_name = f'{args.method}_{str(thres)}_{str(args.model_seed)}'
             self.writer = SummaryWriter(
                 os.path.join(args.log_dir, subdir_name, stage_name,
                              run_name))
@@ -234,8 +233,7 @@ class SinglegraphGST(FullModelSinglegraphAdapter):
         tgt_data = tgt_data.to(self.device)
         performance_dict = dict()
         for thres in threshold_list:
-            lp = "lp" if args.label_prop else ""
-            run_name = f'{args.method}_{lp}_{str(thres)}_{str(args.model_seed)}'
+            run_name = f'{args.method}_{str(thres)}_{str(args.model_seed)}'
             self.writer = SummaryWriter(os.path.join(args.log_dir, subdir_name, stage_name, run_name))
             model, val_score = self._adapt_train_test(tgt_data, thres, args)
             performance_dict[thres] = {'model': model, 'val_score': val_score}
