@@ -145,22 +145,7 @@ def main(args):
 
 
 
-
-    if args.method == "gcst-fpl":
-        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gcst-upl":
-        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gcst-fpl-wo-src":
-        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, device=device)
-    elif args.method == "gcst-upl-wo-src":
-        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
-    elif args.method == "gcst-fpl-wo-con":
-        adapter = MultigraphGCSTFPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gcst-upl-wo-con":
-        adapter = MultigraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gcst-wo-pl":
-        adapter = MultigraphGCSTXPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gst":
+    if args.method == "gst":
         model = Model(encoder, mlp)
         adapter = MultigraphGST(model, device=device)
     elif args.method == "cbst" or args.method == "crst":
@@ -174,6 +159,20 @@ def main(args):
         adapter = MultigraphDeepCORALAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
     elif args.method == "uda-gcn":
         adapter = MultigraphUDAGCNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, path_len=5, device=device)
+    elif args.method == "gcst-fpl":
+        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-upl":
+        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-fpl-wo-src":
+        adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-upl-wo-src":
+        adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-fpl-wo-con":
+        adapter = MultigraphGCSTFPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-upl-wo-con":
+        adapter = MultigraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-wo-pl":
+        adapter = MultigraphGCSTXPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
 
 
 
@@ -202,26 +201,7 @@ def main(args):
         stage_name = "_".join([str(e) for e in train_stage_list[j + 1]])
 
 
-        if args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-wo-pl":
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
-                          stage_name, args)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gst":
+        if args.method == "gst":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args)
             model = adapter.get_model()
@@ -250,6 +230,25 @@ def main(args):
             encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "uda-gcn":
             adapter.adapt(tgt_train_loader, tgt_val_loader, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-wo-pl":
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
+                          stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "fixed":
             pass
