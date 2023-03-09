@@ -115,5 +115,5 @@ def load_elliptic(data_dir):
     return result
 
 if __name__ == '__main__':
-    data_dir = "/home/hhchung/data/graph-data/elliptic_bitcoin_dataset"
+    data_dir = "path/to/elliptic_bitcoin_dataset"
     load_elliptic(data_dir)
