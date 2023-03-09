@@ -5,7 +5,7 @@ To create datasets, modify the data_dir strings in data_create.py and run:
 python data_create.py
 ```
 
-To run experiments, run:
+To run experiments, do:
 ```
 python main.py --shift sbmb --data_dir path/to/data_dir/sbmb --method gcst-upl
 ```

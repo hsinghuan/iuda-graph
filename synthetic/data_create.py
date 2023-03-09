@@ -99,12 +99,12 @@ def make_sbmf_ys(feature_change_data_dir:str):
 
 if __name__ == "__main__":
     set_model_seed(42)
-    block_change_data_dir = "/home/hhchung/data/pyg-data/sbmb"
-    feature_change_data_dir = "/home/hhchung/data/pyg-data/sbmf"
+    block_change_data_dir = "path/to/sbmb"
+    feature_change_data_dir = "path/to/sbmf"
     sbmb_data_list = make_sbmb(block_change_data_dir)
     sbmf_data_list = make_sbmf(feature_change_data_dir)
 
-    block_y_change_data_dir = "/home/hhchung/data/pyg-data/sbmb_ys"
-    feature_y_change_data_dir = "/home/hhchung/data/pyg-data/sbmf_ys"
+    block_y_change_data_dir = "path/to/sbmb_ys"
+    feature_y_change_data_dir = "path/to/sbmf_ys"
     sbmb_ys_data_list = make_sbmb_ys(block_y_change_data_dir)
     sbmf_ys_data_list = make_sbmf_ys(feature_y_change_data_dir)
