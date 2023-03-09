@@ -122,8 +122,22 @@ def main(args):
     if args.analyze_feat:
         dump_feature_y(src_train_loader, "_".join([str(e) for e in train_stage_list[0]]), args.shift)
 
-
-    if args.method == "gcst-fpl":
+    if args.method == "gst":
+        model = Model(encoder, mlp)
+        adapter = MultigraphGST(model, device=device)
+    elif args.method == "cbst" or args.method == "crst":
+        model = Model(encoder, mlp)
+        adapter = MultigraphClassBalancedSelfTrainer(model, src_train_loader, src_val_loader, class_num, device)
+    elif args.method == "dann":
+        adapter = MultigraphDANNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, device=device)
+    elif args.method == "jan":
+        adapter = MultigraphJANAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "deep-coral":
+        adapter = MultigraphDeepCORALAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
+    elif args.method == "uda-gcn":
+        adapter = MultigraphUDAGCNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, path_len=5,
+                                          device=device)
+    elif args.method == "gcst-fpl":
         adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
     elif args.method == "gcst-upl":
         adapter = MultigraphGCSTUPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
@@ -137,20 +151,7 @@ def main(args):
         adapter = MultigraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
     elif args.method == "gcst-wo-pl":
         adapter = MultigraphGCSTXPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-    elif args.method == "gst":
-        model = Model(encoder, mlp)
-        adapter = MultigraphGST(model, device=device)
-    elif args.method == "cbst" or args.method == "crst":
-        model = Model(encoder, mlp)
-        adapter = MultigraphClassBalancedSelfTrainer(model, src_train_loader, src_val_loader, class_num, device)
-    elif args.method == "dann":
-        adapter = MultigraphDANNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, device=device)
-    elif args.method == "jan":
-        adapter = MultigraphJANAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
-    elif args.method == "deep-coral":
-        adapter = MultigraphDeepCORALAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
-    elif args.method == "uda-gcn":
-        adapter = MultigraphUDAGCNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, path_len=5, device=device)
+
 
 
     test_acc_list = []
@@ -179,30 +180,7 @@ def main(args):
         stage_name = "_".join([str(e) for e in train_stage_list[j + 1]])
 
 
-
-        if args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
-                          stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
-                          stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
-            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list,
-                          stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gcst-wo-pl":
-            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
-            adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
-                          stage_name, args, subdir_name=args.shift)
-            encoder, mlp = adapter.get_encoder_classifier()
-        elif args.method == "gst":
+        if args.method == "gst":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, stage_name, args, subdir_name=args.shift)
             model = adapter.get_model()
@@ -232,6 +210,30 @@ def main(args):
         elif args.method == "uda-gcn":
             adapter.adapt(tgt_train_loader, tgt_val_loader, stage_name, args, subdir_name=args.shift)
             encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-upl" or args.method == "gcst-upl-wo-src":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl-wo-con" or args.method == "gcst-upl-wo-con":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-wo-pl":
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
+                          stage_name, args, subdir_name=args.shift)
+            encoder, mlp = adapter.get_encoder_classifier()
+
+
         elif args.method == "fixed":
             pass
         if args.analyze_feat:
