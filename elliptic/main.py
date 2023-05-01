@@ -71,10 +71,12 @@ def test_epoch(encoder, mlp, loader, loss_fn, device='cpu'):
     f1 = f1_score(total_lbl, total_pred)
     return loss, f1
 
-def train_source(split, device, args):
+def train_source(split, device, args, random=False):
     feat_dim = 165
     encoder = TwoLayerGraphSAGE(feat_dim, args.hidden_dim, args.emb_dim).to(device)
     mlp = TwoLayerMLP(args.emb_dim, args.emb_dim // 4, 2).to(device)
+    if random:
+        return encoder, mlp, None, None
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(mlp.parameters()), lr=1e-3)
 
@@ -115,7 +117,7 @@ def train_source(split, device, args):
 def main(args):
     set_model_seed(args.model_seed)
     device = get_device(args.gpuID)
-    encoder, mlp, src_train_loader, src_val_loader = train_source(train_stage_list[0], device, args)
+    encoder, mlp, src_train_loader, src_val_loader = train_source(train_stage_list[0], device, args, random=args.method=="random")
     f1_list = []
     class_num = 2
 
@@ -159,6 +161,8 @@ def main(args):
         adapter = MultigraphDeepCORALAdapter(encoder, mlp, src_train_loader, src_val_loader, device=device)
     elif args.method == "uda-gcn":
         adapter = MultigraphUDAGCNAdapter(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, path_len=5, device=device)
+    elif args.method == "dane":
+        adapter = MultigraphDANE(encoder, mlp, src_train_loader, src_val_loader, args.emb_dim, d_epochs=5, device=device)
     elif args.method == "gcst-fpl":
         adapter = MultigraphGCSTFPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
     elif args.method == "gcst-upl":
@@ -173,7 +177,10 @@ def main(args):
         adapter = MultigraphGCSTUPLXCON(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
     elif args.method == "gcst-wo-pl":
         adapter = MultigraphGCSTXPL(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
-
+    elif args.method == "gcst-fpl-direct":
+        adapter = MultigraphGCSTFPLDirect(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
+    elif args.method == "gcst-upl-direct":
+        adapter = MultigraphGCSTUPLDirect(encoder, mlp, args.emb_dim, src_train_loader, src_val_loader, device=device)
 
 
     for j, test_stage in enumerate(test_stage_list):
@@ -231,6 +238,11 @@ def main(args):
         elif args.method == "uda-gcn":
             adapter.adapt(tgt_train_loader, tgt_val_loader, stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "dane":
+            adv_coeff_list = [0.1, 1] # k1
+            ce_coeff_list = [1, 10] # k2
+            adapter.adapt(tgt_train_loader, tgt_val_loader, adv_coeff_list, ce_coeff_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
         elif args.method == "gcst-fpl" or args.method == "gcst-fpl-wo-src":
             threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
             contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
@@ -250,7 +262,14 @@ def main(args):
             adapter.adapt(tgt_train_loader, tgt_val_loader, contrast_list,
                           stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-upl-direct" or args.method == "gcst-fpl-direct":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_train_loader, tgt_val_loader, threshold_list, contrast_list,stage_name, args)
+            encoder, mlp = adapter.get_adapted_encoder_classifier()
         elif args.method == "fixed":
+            pass
+        elif args.method == "random":
             pass
         else:
             print("Method not found")

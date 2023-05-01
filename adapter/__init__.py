@@ -3,9 +3,12 @@ from .gcst_upl import MultigraphGCSTUPL, SinglegraphGCSTUPL
 from .gcst_fpl_wo_con import MultigraphGCSTFPLXCON, SinglegraphGCSTFPLXCON
 from .gcst_upl_wo_con import MultigraphGCSTUPLXCON, SinglegraphGCSTUPLXCON
 from .gcst_wo_pl import MultigraphGCSTXPL, SinglegraphGCSTXPL
+from .gcst_upl_direct import MultigraphGCSTUPLDirect, SinglegraphGCSTUPLDirect
+from .gcst_fpl_direct import MultigraphGCSTFPLDirect, SinglegraphGCSTFPLDirect
 from .gst import MultigraphGST, SinglegraphGST
 from .cbst import MultigraphClassBalancedSelfTrainer, SinglegraphClassBalancedSelfTrainer
 from .jan import MultigraphJANAdapter, SinglegraphJANAdapter
 from .dann import SinglegraphDANNAdapter, MultigraphDANNAdapter
 from .coral import SinglegraphDeepCORALAdapter, MultigraphDeepCORALAdapter
 from .udagcn import MultigraphUDAGCNAdapter, SinglegraphUDAGCNAdapter
+from .dane import MultigraphDANE, SinglegraphDANE

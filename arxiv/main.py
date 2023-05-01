@@ -49,10 +49,12 @@ def test_epoch(encoder, mlp, data, evaluator):
 
     return val_loss, val_acc
 
-def train_source(data, device, evaluator, args):
+def train_source(data, device, evaluator, args, random=False):
     feat_dim = 128
     encoder = TwoLayerGraphSAGE(feat_dim, args.hidden_dim, args.emb_dim).to(device)
     mlp = TwoLayerMLP(args.emb_dim, args.emb_dim // 4, 40).to(device)
+    if random:
+        return encoder, mlp
     data = data.to(device)
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(mlp.parameters()), lr=1e-3)
 
@@ -84,7 +86,7 @@ def main(args):
     print("Partition data and train at source")
     src_data = temp_partition_arxiv(data, train_stage_list[0])
     print("Finish partition")
-    encoder, mlp = train_source(src_data, device, evaluator, args)
+    encoder, mlp = train_source(src_data, device, evaluator, args, random=args.method=="random")
     acc_list = []
 
     @torch.no_grad()
@@ -125,6 +127,8 @@ def main(args):
         adapter = SinglegraphDeepCORALAdapter(encoder, mlp, src_data, device=device)
     elif args.method == "uda-gcn":
         adapter = SinglegraphUDAGCNAdapter(encoder, mlp, src_data, args.emb_dim, path_len=10, device=device)
+    elif args.method == "dane":
+        adapter = SinglegraphDANE(encoder, mlp, src_data, args.emb_dim, d_epochs=5, device=device)
     elif args.method == "gcst-fpl":
         adapter = SinglegraphGCSTFPL(encoder, mlp, args.emb_dim, src_data, device=device)
     elif args.method == "gcst-upl":
@@ -139,6 +143,10 @@ def main(args):
         adapter = SinglegraphGCSTUPL(encoder, mlp, args.emb_dim, device=device)
     elif args.method == "gcst-wo-pl":
         adapter = SinglegraphGCSTXPL(encoder, mlp, args.emb_dim, device=device)
+    elif args.method == "gcst-fpl-direct":
+        adapter = SinglegraphGCSTFPLDirect(encoder, mlp, args.emb_dim, src_data, device=device)
+    elif args.method == "gcst-upl-direct":
+        adapter = SinglegraphGCSTUPLDirect(encoder, mlp, args.emb_dim, src_data, device=device)
 
 
 
@@ -218,6 +226,18 @@ def main(args):
             contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
             adapter.adapt(tgt_data, contrast_list, stage_name, args)
             encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "gcst-fpl-direct" or args.method == "gcst-upl-direct":
+            threshold_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+            contrast_list = [0.01, 0.05, 0.1, 0.5, 1]
+            adapter.adapt(tgt_data, threshold_list, contrast_list, stage_name, args)
+            encoder, mlp = adapter.get_adapted_encoder_classifier()
+        elif args.method == "dane":
+            adv_coeff_list = [0.1, 1] # k1
+            ce_coeff_list = [1, 10] # k2
+            adapter.adapt(tgt_data, adv_coeff_list, ce_coeff_list, stage_name, args)
+            encoder, mlp = adapter.get_encoder_classifier()
+        elif args.method == "random":
+            pass
         else:
             print("Unknown method")
             exit()
